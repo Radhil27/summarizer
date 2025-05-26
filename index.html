@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Text Summarizer</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @keyframes pulse {
+      0% { transform: scale(1); }
+      50% { transform: scale(1.05); }
+      100% { transform: scale(1); }
+    }
+    @keyframes fadeIn {
+      0% { opacity: 0; transform: translateY(20px); }
+      100% { opacity: 1; transform: translateY(0); }
+    }
+    .animate-pulse-slow {
+      animation: pulse 2s ease-in-out infinite;
+    }
+    .animate-fade-in {
+      animation: fadeIn 0.5s ease-out;
+    }
+    .gradient-bg {
+      background: linear-gradient(135deg, #1a1a1a 0%, #3d0000 100%);
+    }
+    .hover-glow:hover {
+      box-shadow: 0 0 20px rgba(255, 0, 0, 0.5);
+    }
+  </style>
+</head>
+<body class="gradient-bg min-h-screen flex items-center justify-center p-4 sm:p-8">
+  <div class="max-w-3xl w-full bg-black bg-opacity-80 rounded-2xl shadow-2xl p-6 sm:p-8 text-white animate-fade-in">
+    <h1 class="text-4xl sm:text-5xl font-bold text-red-600 text-center mb-6">Text Summarizer</h1>
+    <p class="text-center text-gray-300 mb-8">Paste your text below and get a concise summary with a single click!</p>
+    
+    <textarea 
+      id="inputText" 
+      rows="8" 
+      class="w-full p-4 rounded-lg bg-gray-900 border border-red-600 text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 transition-all duration-300 hover-glow" 
+      placeholder="Paste your text here..."
+    ></textarea>
+    <p id="wordCount" class="text-gray-400 text-sm mt-2">0 words</p>
+
+    <label for="summaryLength" class="text-gray-300 mt-4 block">Summary Length: <span id="lengthValue">Medium</span></label>
+    <input type="range" id="summaryLength" min="50" max="200" value="100" class="w-full accent-red-600">
+
+    <div class="mt-4 flex flex-col sm:flex-row gap-4">
+      <button 
+        onclick="summarizeText()" 
+        class="w-full sm:w-1/2 bg-red-600 text-white font-semibold py-3 rounded-lg hover:bg-red-700 transition-all duration-300 animate-pulse-slow hover-glow"
+      >
+        Summarize Now
+      </button>
+      <button 
+        onclick="clearText()" 
+        class="w-full sm:w-1/2 bg-gray-700 text-white font-semibold py-3 rounded-lg hover:bg-gray-800 transition-all duration-300"
+      >
+        Clear
+      </button>
+    </div>
+    
+    <div 
+      id="summary" 
+      class="mt-6 p-4 rounded-lg bg-gray-900 border border-red-600 text-gray-200 hidden"
+    ></div>
+  </div>
+
+  <script>
+    // >>>>>>>>>> PUT YOUR ACTUAL HUGGING FACE API KEY HERE <<<<<<<<<<
+    const HF_API_TOKEN = "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"; // Replace with your real Hugging Face token
+    const HF_API_URL = "https://api-inference.huggingface.co/models/facebook/bart-large-cnn";
+
+    // Word count update
+    const inputText = document.getElementById("inputText");
+    const wordCount = document.getElementById("wordCount");
+    inputText.addEventListener("input", () => {
+      const words = inputText.value.trim().split(/\s+/).filter(w => w.length > 0).length;
+      wordCount.innerText = `${words} words`;
+    });
+
+    // Summary length slider
+    const slider = document.getElementById("summaryLength");
+    const lengthValue = document.getElementById("lengthValue");
+    slider.addEventListener("input", () => {
+      const value = slider.value;
+      lengthValue.innerText = value < 80 ? "Short" : value < 150 ? "Medium" : "Long";
+    });
+
+    async function summarizeText() {
+      const cleanedText = inputText.value.replace(/\s+/g, ' ').trim();
+      const summaryDiv = document.getElementById("summary");
+      
+      if (!cleanedText) {
+        summaryDiv.innerHTML = "<p>Please enter some text to summarize!</p>";
+        summaryDiv.classList.remove("hidden");
+        summaryDiv.classList.add("animate-fade-in");
+        return;
+      }
+
+      if (cleanedText.split(' ').length > 1000) {
+        summaryDiv.innerHTML = "<p>Error: Input text is too long. Please use 1000 words or fewer.</p>";
+        summaryDiv.classList.remove("hidden");
+        summaryDiv.classList.add("animate-fade-in");
+        return;
+      }
+
+      summaryDiv.innerHTML = `<div class="flex justify-center items-center gap-2"><svg class="animate-spin h-5 w-5 text-red-600" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none" /></svg> Summarizing... (May take 10-20 seconds)</div>`;
+      summaryDiv.classList.remove("hidden");
+      summaryDiv.classList.add("animate-fade-in");
+
+      try {
+        const response = await fetch(HF_API_URL, {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${HF_API_TOKEN}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            inputs: cleanedText,
+            parameters: {
+              max_length: parseInt(slider.value),
+              min_length: Math.floor(parseInt(slider.value) / 2),
+              num_beams: 4,
+              do_sample: false
+            }
+          })
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          if (errorData.error.includes("Model is currently loading")) {
+            summaryDiv.innerHTML = "<p>Model is loading, please try again in a minute.</p>";
+          } else if (errorData.error.includes("Authorization")) {
+            summaryDiv.innerHTML = "<p>Invalid API key. Please check your Hugging Face token.</p>";
+          } else {
+            summaryDiv.innerHTML = `<p>Error: ${errorData.error || "Failed to summarize text"}</p>`;
+          }
+          return;
+        }
+
+        const data = await response.json();
+        if (data && data[0] && data[0].summary_text) {
+          let summary = data[0].summary_text;
+          summary = summary.substring(0, summary.lastIndexOf('.') + 1); // Ensure complete sentence
+          summaryDiv.innerHTML = `<p><strong>Summary:</strong> ${summary}</p>`;
+        } else {
+          summaryDiv.innerHTML = "<p>Error: Unexpected response format</p>";
+        }
+      } catch (error) {
+        summaryDiv.innerHTML = `<p>Error: ${error.message}</p>`;
+        console.error("Summarization error:", error);
+      }
+    }
+
+    function clearText() {
+      inputText.value = "";
+      wordCount.innerText = "0 words";
+      document.getElementById("summary").innerHTML = "";
+      document.getElementById("summary").classList.add("hidden");
+      slider.value = 100;
+      lengthValue.innerText = "Medium";
+    }
+  </script>
+</body>
+</html>
